@@ -1,0 +1,819 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserRole {
+  USER
+  MODERATOR
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+  PENDING_VERIFICATION
+}
+
+enum ServiceType {
+  DIGITAL
+  PHYSICAL
+  KNOWLEDGE
+  CREATIVE
+  TECHNICAL
+  EDUCATIONAL
+  SOCIAL
+  OTHER
+}
+
+enum ServiceStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+enum RequestStatus {
+  OPEN
+  IN_PROGRESS
+  FULFILLED
+  CANCELLED
+  EXPIRED
+}
+
+enum ExchangeStatus {
+  PENDING
+  ACCEPTED
+  IN_PROGRESS
+  COMPLETED
+  DISPUTED
+  CANCELLED
+}
+
+enum ExchangeType {
+  BARTER    // خدمة مقابل خدمة مباشرة
+  POINTS    // نقاط داخلية
+  HYBRID    // كلاهما
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  FILE
+  SYSTEM
+  OFFER
+  COUNTER_OFFER
+}
+
+enum NotificationType {
+  NEW_MESSAGE
+  EXCHANGE_REQUEST
+  EXCHANGE_ACCEPTED
+  EXCHANGE_COMPLETED
+  EXCHANGE_DISPUTED
+  NEW_REVIEW
+  POINTS_RECEIVED
+  SYSTEM_ALERT
+  MATCH_SUGGESTION
+}
+
+enum ReportReason {
+  SPAM
+  FAKE_SERVICE
+  INAPPROPRIATE_CONTENT
+  SCAM
+  HARASSMENT
+  OTHER
+}
+
+enum ReportStatus {
+  PENDING
+  UNDER_REVIEW
+  RESOLVED
+  DISMISSED
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+// ============================================================
+// USER & AUTHENTICATION
+// ============================================================
+
+model User {
+  id                  String             @id @default(cuid())
+  email               String             @unique
+  emailVerified       DateTime?
+  username            String             @unique
+  displayName         String
+  bio                 String?            @db.Text
+  avatar              String?
+  coverImage          String?
+  phone               String?
+  location            String?
+  city                String?
+  country             String             @default("SA")
+  timezone            String             @default("Asia/Riyadh")
+  language            String             @default("ar")
+  website             String?
+  
+  // Auth
+  password            String?
+  role                UserRole           @default(USER)
+  status              UserStatus         @default(ACTIVE)
+  
+  // Points System
+  totalPoints         Int                @default(0)
+  availablePoints     Int                @default(0)
+  reservedPoints      Int                @default(0)
+  lifetimePointsEarned Int              @default(0)
+  lifetimePointsSpent Int               @default(0)
+  
+  // Reputation
+  reputationScore     Float              @default(0)
+  totalReviews        Int                @default(0)
+  completedExchanges  Int                @default(0)
+  successRate         Float              @default(0)
+  
+  // Verification
+  isEmailVerified     Boolean            @default(false)
+  isPhoneVerified     Boolean            @default(false)
+  isIdentityVerified  Boolean            @default(false)
+  identityVerification VerificationStatus @default(UNVERIFIED)
+  
+  // Preferences
+  notificationsEnabled Boolean           @default(true)
+  emailNotifications  Boolean            @default(true)
+  pushNotifications   Boolean            @default(true)
+  profileVisibility   String             @default("public")
+  
+  // Timestamps
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  lastActiveAt        DateTime?
+  deletedAt           DateTime?
+  
+  // Relations
+  accounts            Account[]
+  sessions            Session[]
+  skills              UserSkill[]
+  servicesOffered     Service[]          @relation("ServiceProvider")
+  requestsPosted      ServiceRequest[]   @relation("RequestPoster")
+  exchangesAsProvider Exchange[]         @relation("ExchangeProvider")
+  exchangesAsReceiver Exchange[]         @relation("ExchangeReceiver")
+  reviewsGiven        Review[]           @relation("ReviewGiver")
+  reviewsReceived     Review[]           @relation("ReviewReceiver")
+  messagessSent       Message[]          @relation("MessageSender")
+  notifications       Notification[]
+  pointsTransactions  PointsTransaction[]
+  reports             Report[]           @relation("Reporter")
+  reportsAgainst      Report[]           @relation("ReportTarget")
+  savedServices       SavedService[]
+  followers           Follow[]           @relation("Follower")
+  following           Follow[]           @relation("Following")
+  badges              UserBadge[]
+  loginHistory        LoginHistory[]
+  
+  @@index([email])
+  @@index([username])
+  @@index([status])
+  @@index([reputationScore])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  userAgent    String?
+  ipAddress    String?
+  
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+  type       String   @default("email")
+  
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================================
+// SKILLS & CATEGORIES
+// ============================================================
+
+model Category {
+  id          String      @id @default(cuid())
+  name        String
+  nameAr      String
+  slug        String      @unique
+  icon        String?
+  color       String?
+  description String?
+  parentId    String?
+  sortOrder   Int         @default(0)
+  isActive    Boolean     @default(true)
+  
+  parent      Category?   @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    Category[]  @relation("CategoryHierarchy")
+  skills      Skill[]
+  services    Service[]
+  requests    ServiceRequest[]
+  
+  @@index([slug])
+  @@index([parentId])
+  @@map("categories")
+}
+
+model Skill {
+  id          String      @id @default(cuid())
+  name        String
+  nameAr      String
+  slug        String      @unique
+  categoryId  String?
+  isVerifiable Boolean    @default(false)
+  
+  category    Category?   @relation(fields: [categoryId], references: [id])
+  users       UserSkill[]
+  services    ServiceSkill[]
+  requests    RequestSkill[]
+  
+  @@index([categoryId])
+  @@map("skills")
+}
+
+model UserSkill {
+  id              String             @id @default(cuid())
+  userId          String
+  skillId         String
+  level           Int                @default(1) // 1-5
+  yearsExperience Int?
+  isVerified      Boolean            @default(false)
+  verifiedAt      DateTime?
+  
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skill           Skill              @relation(fields: [skillId], references: [id])
+  
+  @@unique([userId, skillId])
+  @@index([userId])
+  @@index([skillId])
+  @@map("user_skills")
+}
+
+// ============================================================
+// SERVICES
+// ============================================================
+
+model Service {
+  id              String         @id @default(cuid())
+  providerId      String
+  title           String
+  titleAr         String?
+  description     String         @db.Text
+  descriptionAr   String?        @db.Text
+  categoryId      String?
+  type            ServiceType    @default(OTHER)
+  status          ServiceStatus  @default(DRAFT)
+  
+  // Pricing in Points
+  pointsMin       Int?
+  pointsMax       Int?
+  estimatedHours  Float?
+  
+  // Location
+  isRemote        Boolean        @default(true)
+  city            String?
+  country         String?
+  
+  // Media
+  images          String[]       @default([])
+  tags            String[]       @default([])
+  
+  // Stats
+  viewCount       Int            @default(0)
+  saveCount       Int            @default(0)
+  exchangeCount   Int            @default(0)
+  avgRating       Float?
+  
+  // Availability
+  availableFrom   DateTime?
+  availableTo     DateTime?
+  maxConcurrent   Int            @default(1)
+  
+  // SEO
+  slug            String?        @unique
+  
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  publishedAt     DateTime?
+  
+  // Relations
+  provider        User           @relation("ServiceProvider", fields: [providerId], references: [id], onDelete: Cascade)
+  category        Category?      @relation(fields: [categoryId], references: [id])
+  skills          ServiceSkill[]
+  exchanges       Exchange[]     @relation("ProviderService")
+  receivedExchanges Exchange[]   @relation("ReceiverService")
+  savedBy         SavedService[]
+  
+  @@index([providerId])
+  @@index([categoryId])
+  @@index([status])
+  @@index([type])
+  @@index([createdAt])
+  @@index([avgRating])
+  @@map("services")
+}
+
+model ServiceSkill {
+  serviceId   String
+  skillId     String
+  
+  service     Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  skill       Skill    @relation(fields: [skillId], references: [id])
+  
+  @@id([serviceId, skillId])
+  @@map("service_skills")
+}
+
+model SavedService {
+  userId      String
+  serviceId   String
+  createdAt   DateTime @default(now())
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  service     Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  
+  @@id([userId, serviceId])
+  @@map("saved_services")
+}
+
+// ============================================================
+// SERVICE REQUESTS
+// ============================================================
+
+model ServiceRequest {
+  id              String          @id @default(cuid())
+  posterId        String
+  title           String
+  description     String          @db.Text
+  categoryId      String?
+  status          RequestStatus   @default(OPEN)
+  
+  // What they're offering in return
+  offerDescription String?        @db.Text
+  offerPoints     Int?
+  offerServiceId  String?
+  
+  // Requirements
+  isRemote        Boolean         @default(true)
+  city            String?
+  country         String?
+  deadline        DateTime?
+  urgencyLevel    Int             @default(1) // 1-3
+  
+  tags            String[]        @default([])
+  
+  // Stats
+  viewCount       Int             @default(0)
+  responseCount   Int             @default(0)
+  
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  expiresAt       DateTime?
+  
+  // Relations
+  poster          User            @relation("RequestPoster", fields: [posterId], references: [id], onDelete: Cascade)
+  category        Category?       @relation(fields: [categoryId], references: [id])
+  skills          RequestSkill[]
+  exchanges       Exchange[]
+  
+  @@index([posterId])
+  @@index([categoryId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("service_requests")
+}
+
+model RequestSkill {
+  requestId   String
+  skillId     String
+  isRequired  Boolean  @default(true)
+  
+  request     ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  skill       Skill          @relation(fields: [skillId], references: [id])
+  
+  @@id([requestId, skillId])
+  @@map("request_skills")
+}
+
+// ============================================================
+// EXCHANGES (Core Feature)
+// ============================================================
+
+model Exchange {
+  id                String          @id @default(cuid())
+  
+  // Parties
+  providerId        String          // من يقدم الخدمة
+  receiverId        String          // من يطلب الخدمة
+  
+  // Related Services/Requests
+  providerServiceId String?         // الخدمة المقدمة
+  receiverServiceId String?         // الخدمة المقابلة (في حالة barter)
+  requestId         String?         // الطلب الأصلي إن وجد
+  
+  // Exchange Details
+  type              ExchangeType    @default(BARTER)
+  status            ExchangeStatus  @default(PENDING)
+  
+  // Points
+  pointsAmount      Int?            // في حالة نقاط
+  pointsLocked      Boolean         @default(false)
+  
+  // Description
+  title             String
+  description       String?         @db.Text
+  terms             String?         @db.Text
+  
+  // Timeline
+  estimatedDuration Int?            // بالساعات
+  startedAt         DateTime?
+  expectedEndAt     DateTime?
+  completedAt       DateTime?
+  cancelledAt       DateTime?
+  
+  // Dispute
+  isDisputed        Boolean         @default(false)
+  disputeReason     String?         @db.Text
+  disputeResolvedAt DateTime?
+  disputeResolution String?         @db.Text
+  
+  // Confirmation
+  providerConfirmed Boolean         @default(false)
+  receiverConfirmed Boolean         @default(false)
+  providerConfirmedAt DateTime?
+  receiverConfirmedAt DateTime?
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  provider          User            @relation("ExchangeProvider", fields: [providerId], references: [id])
+  receiver          User            @relation("ExchangeReceiver", fields: [receiverId], references: [id])
+  providerService   Service?        @relation("ProviderService", fields: [providerServiceId], references: [id])
+  receiverService   Service?        @relation("ReceiverService", fields: [receiverServiceId], references: [id])
+  request           ServiceRequest? @relation(fields: [requestId], references: [id])
+  messages          Message[]
+  reviews           Review[]
+  milestones        Milestone[]
+  
+  @@index([providerId])
+  @@index([receiverId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("exchanges")
+}
+
+model Milestone {
+  id          String    @id @default(cuid())
+  exchangeId  String
+  title       String
+  description String?   @db.Text
+  dueDate     DateTime?
+  completedAt DateTime?
+  isCompleted Boolean   @default(false)
+  order       Int       @default(0)
+  
+  exchange    Exchange  @relation(fields: [exchangeId], references: [id], onDelete: Cascade)
+  
+  @@index([exchangeId])
+  @@map("milestones")
+}
+
+// ============================================================
+// MESSAGING
+// ============================================================
+
+model Conversation {
+  id           String    @id @default(cuid())
+  exchangeId   String?   @unique
+  participantIds String[] // Array of user IDs
+  lastMessageAt DateTime?
+  isArchived   Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  
+  messages     Message[]
+  
+  @@index([participantIds])
+  @@map("conversations")
+}
+
+model Message {
+  id              String       @id @default(cuid())
+  conversationId  String?
+  exchangeId      String?
+  senderId        String
+  type            MessageType  @default(TEXT)
+  content         String       @db.Text
+  
+  // Attachments
+  attachments     Json?        // [{url, type, name, size}]
+  
+  // Offer Details (when type=OFFER)
+  offerData       Json?
+  
+  // Status
+  isRead          Boolean      @default(false)
+  readAt          DateTime?
+  isDeleted       Boolean      @default(false)
+  deletedAt       DateTime?
+  
+  // Reply
+  replyToId       String?
+  
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  
+  // Relations
+  conversation    Conversation? @relation(fields: [conversationId], references: [id])
+  exchange        Exchange?    @relation(fields: [exchangeId], references: [id])
+  sender          User         @relation("MessageSender", fields: [senderId], references: [id])
+  replyTo         Message?     @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies         Message[]    @relation("MessageReplies")
+  
+  @@index([conversationId])
+  @@index([exchangeId])
+  @@index([senderId])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+// ============================================================
+// REVIEWS & RATINGS
+// ============================================================
+
+model Review {
+  id          String    @id @default(cuid())
+  exchangeId  String
+  giverId     String
+  receiverId  String
+  
+  rating      Int       // 1-5
+  title       String?
+  content     String?   @db.Text
+  
+  // Sub-ratings
+  qualityRating       Int?
+  communicationRating Int?
+  timelinessRating    Int?
+  
+  isPublic    Boolean   @default(true)
+  isVerified  Boolean   @default(true)
+  
+  response    String?   @db.Text
+  respondedAt DateTime?
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  exchange    Exchange  @relation(fields: [exchangeId], references: [id])
+  giver       User      @relation("ReviewGiver", fields: [giverId], references: [id])
+  receiver    User      @relation("ReviewReceiver", fields: [receiverId], references: [id])
+  
+  @@unique([exchangeId, giverId])
+  @@index([receiverId])
+  @@index([rating])
+  @@map("reviews")
+}
+
+// ============================================================
+// POINTS SYSTEM
+// ============================================================
+
+model PointsTransaction {
+  id              String    @id @default(cuid())
+  userId          String
+  amount          Int       // + for earn, - for spend
+  balance         Int       // balance after transaction
+  type            String    // EARNED, SPENT, LOCKED, UNLOCKED, BONUS, PENALTY
+  reason          String
+  relatedExchangeId String?
+  
+  metadata        Json?
+  
+  createdAt       DateTime  @default(now())
+  
+  user            User      @relation(fields: [userId], references: [id])
+  
+  @@index([userId])
+  @@index([createdAt])
+  @@map("points_transactions")
+}
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+
+model Notification {
+  id          String           @id @default(cuid())
+  userId      String
+  type        NotificationType
+  title       String
+  titleAr     String?
+  body        String
+  bodyAr      String?
+  
+  relatedId   String?          // ID of related entity
+  relatedType String?          // Type of related entity
+  actionUrl   String?
+  
+  isRead      Boolean          @default(false)
+  readAt      DateTime?
+  
+  createdAt   DateTime         @default(now())
+  
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+// ============================================================
+// SOCIAL FEATURES
+// ============================================================
+
+model Follow {
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+  
+  follower    User     @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+  
+  @@id([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+  @@map("follows")
+}
+
+// ============================================================
+// BADGES & ACHIEVEMENTS
+// ============================================================
+
+model Badge {
+  id          String      @id @default(cuid())
+  name        String
+  nameAr      String
+  description String
+  icon        String
+  color       String
+  criteria    Json        // Criteria to earn badge
+  points      Int         @default(0)
+  isActive    Boolean     @default(true)
+  
+  users       UserBadge[]
+  
+  @@map("badges")
+}
+
+model UserBadge {
+  userId      String
+  badgeId     String
+  earnedAt    DateTime @default(now())
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  badge       Badge    @relation(fields: [badgeId], references: [id])
+  
+  @@id([userId, badgeId])
+  @@map("user_badges")
+}
+
+// ============================================================
+// REPORTS & MODERATION
+// ============================================================
+
+model Report {
+  id          String        @id @default(cuid())
+  reporterId  String
+  targetId    String
+  targetType  String        // USER, SERVICE, REQUEST, EXCHANGE, MESSAGE
+  reason      ReportReason
+  description String        @db.Text
+  status      ReportStatus  @default(PENDING)
+  
+  resolvedBy  String?
+  resolution  String?
+  resolvedAt  DateTime?
+  
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  
+  reporter    User          @relation("Reporter", fields: [reporterId], references: [id])
+  target      User          @relation("ReportTarget", fields: [targetId], references: [id])
+  
+  @@index([reporterId])
+  @@index([targetId])
+  @@index([status])
+  @@map("reports")
+}
+
+// ============================================================
+// AUDIT & SECURITY
+// ============================================================
+
+model AuditLog {
+  id          String    @id @default(cuid())
+  userId      String?
+  action      String
+  entityType  String?
+  entityId    String?
+  oldData     Json?
+  newData     Json?
+  ipAddress   String?
+  userAgent   String?
+  
+  createdAt   DateTime  @default(now())
+  
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model LoginHistory {
+  id          String    @id @default(cuid())
+  userId      String
+  ipAddress   String?
+  userAgent   String?
+  country     String?
+  city        String?
+  isSuccess   Boolean   @default(true)
+  failReason  String?
+  
+  createdAt   DateTime  @default(now())
+  
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([createdAt])
+  @@map("login_history")
+}
+
+// ============================================================
+// SYSTEM SETTINGS
+// ============================================================
+
+model SystemSetting {
+  key         String    @id
+  value       Json
+  description String?
+  updatedAt   DateTime  @updatedAt
+  
+  @@map("system_settings")
+}
