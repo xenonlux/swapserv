@@ -1,0 +1,52 @@
+name: repository-maintenance
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repository-maintenance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check patch formatting
+        run: git diff --check
+      - name: Set up Node.js
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Node dependencies
+        if: hashFiles('package.json') != ''
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install --package-lock=false; fi
+      - name: Run lint
+        if: hashFiles('package.json') != ''
+        run: npm run lint --if-present
+      - name: Run tests
+        if: hashFiles('package.json') != ''
+        run: npm test --if-present
+      - name: Run build
+        if: hashFiles('package.json') != ''
+        run: npm run build --if-present
+      - name: Run Go checks
+        if: hashFiles('go.mod') != ''
+        run: |
+          go test ./...
+          go vet ./...
+      - name: Run Rust checks
+        if: hashFiles('Cargo.toml') != ''
+        run: cargo test --locked
