@@ -1,0 +1,41 @@
+name: Compose configuration validation
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate-compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate Compose configuration without starting services
+        run: docker compose -f docker-compose.yml config --quiet
+      - name: Assert development ports are loopback-bound
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          compose = Path("docker-compose.yml").read_text(encoding="utf-8")
+          expected = (
+              '"127.0.0.1:5432:5432"',
+              '"127.0.0.1:6379:6379"',
+              '"127.0.0.1:8081:8081"',
+              '"127.0.0.1:5050:80"',
+          )
+          for mapping in expected:
+              assert mapping in compose, f"missing loopback mapping for host port {mapping.split(':')[1]}"
+          print("Verified four loopback-bound development ports.")
+          PY
