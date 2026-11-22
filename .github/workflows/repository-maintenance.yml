@@ -50,6 +50,9 @@ jobs:
       - name: Run lint
         if: hashFiles('package.json') != ''
         run: npm run lint --if-present
+      - name: Run type-check
+        if: hashFiles('package.json') != ''
+        run: npm run type-check --if-present
       - name: Run tests
         if: hashFiles('package.json') != ''
         run: npm test --if-present
